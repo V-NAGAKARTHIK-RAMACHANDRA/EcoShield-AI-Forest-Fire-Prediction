@@ -41,4 +41,4 @@ AIML Student Project
 
 ## Project Dashboard
 
-![Dashboard](Dashborad.png)
+![Dashboard](Dashboard.png)
