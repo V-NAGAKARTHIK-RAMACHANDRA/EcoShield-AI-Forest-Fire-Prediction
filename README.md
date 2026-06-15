@@ -38,3 +38,7 @@ The system predicts forest fire risk using:
 ## Developed By
 
 AIML Student Project
+
+## Project Dashboard
+
+![Dashboard](dashboard.png.png)
