@@ -1,10 +1,20 @@
-import os
+
+"""
+EcoShield AI v2.2
+Forest Fire Risk Intelligence Dashboard
+
+Run:
+    streamlit run app_v2.py
+"""
+
+from pathlib import Path
+from textwrap import dedent
 import base64
-import requests
+
 import pandas as pd
+import requests
 import streamlit as st
 
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
     accuracy_score,
@@ -13,320 +23,530 @@ from sklearn.metrics import (
     f1_score,
     confusion_matrix,
 )
+from sklearn.model_selection import train_test_split
 
 try:
     import pydeck as pdk
-
-    PYDECK = True
+    PYDECK_AVAILABLE = True
 except ImportError:
-    PYDECK = False
+    PYDECK_AVAILABLE = False
 
 
-# =========================================================
-# CONFIG
-# =========================================================
-
+# ============================================================
+# PAGE CONFIG
+# ============================================================
 st.set_page_config(
     page_title="EcoShield AI",
-    page_icon="🌲",
+    page_icon="🔥",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 
-# =========================================================
-# BACKGROUND IMAGE
-# =========================================================
+# ============================================================
+# HELPERS
+# ============================================================
+def html(content: str):
+    """
+    Render HTML directly.
 
-BG_PATH = os.path.join("assets", "forest_background.jpg")
+    Streamlit's st.html() is used instead of st.markdown() so that
+    HTML such as <div>, <strong>, <br> and custom cards is never
+    displayed as source code.
+    """
+    clean = dedent(content).strip()
+
+    if hasattr(st, "html"):
+        st.html(clean)
+    else:
+        st.markdown(clean, unsafe_allow_html=True)
 
 
-def load_background():
+def background_css():
+    candidates = [
+        Path("forest_background.jpg"),
+        Path("forest_background.jpeg"),
+        Path("assets/forest_background.jpg"),
+        Path("assets/forest_background.jpeg"),
+    ]
 
-    if not os.path.exists(BG_PATH):
-        return ""
+    for image_path in candidates:
+        if image_path.exists():
+            try:
+                encoded = base64.b64encode(image_path.read_bytes()).decode()
+                return f"""
+                    background-image:
+                        linear-gradient(
+                            rgba(3, 16, 9, 0.84),
+                            rgba(3, 16, 9, 0.94)
+                        ),
+                        url("data:image/jpeg;base64,{encoded}");
+                    background-size: cover;
+                    background-position: center;
+                    background-attachment: fixed;
+                """
+            except Exception:
+                pass
 
-    with open(BG_PATH, "rb") as f:
-        return base64.b64encode(f.read()).decode()
-
-
-BG = load_background()
-
-
-# =========================================================
-# PREMIUM UI
-# =========================================================
-
-if BG:
-
-    background = f"""
-    background-image:
-        linear-gradient(
-            rgba(2, 12, 7, 0.78),
-            rgba(2, 12, 7, 0.92)
-        ),
-        url("data:image/jpeg;base64,{BG}");
+    return """
+        background:
+            radial-gradient(
+                circle at 80% 10%,
+                rgba(255, 99, 32, 0.10),
+                transparent 30%
+            ),
+            linear-gradient(135deg, #02150b, #062719 55%, #03170d);
     """
 
-else:
 
-    background = """
-    background:
-        linear-gradient(
-            135deg,
-            #06140b,
-            #0b2414,
-            #020805
-        );
-    """
-
-
-st.markdown(
-    f"""
+html(f"""
 <style>
 
+html, body, [class*="css"] {{
+    font-family: "Times New Roman", Times, serif !important;
+}}
+
 .stApp {{
-    {background}
-
-    background-size: cover;
-    background-position: center;
-    background-attachment: fixed;
+    {background_css()}
+    color: #f4f7f5;
 }}
 
-.block-container {{
-    padding-top: 1.2rem;
-    padding-bottom: 3rem;
-    max-width: 1500px;
+[data-testid="stHeader"] {{
+    background: rgba(0,0,0,0.16);
 }}
 
-/* SIDEBAR */
-
-section[data-testid="stSidebar"] {{
+[data-testid="stSidebar"] {{
     background:
         linear-gradient(
             180deg,
-            rgba(2,15,8,.97),
-            rgba(3,28,14,.96)
+            rgba(1, 20, 11, 0.98),
+            rgba(0, 34, 18, 0.97)
         );
-
-    border-right:
-        1px solid rgba(163,230,53,.20);
+    border-right: 1px solid rgba(130, 255, 170, 0.14);
 }}
 
-section[data-testid="stSidebar"] * {{
-    color: #f0fdf4;
+[data-testid="stSidebar"] * {{
+    font-family: "Times New Roman", Times, serif !important;
 }}
 
-/* TITLES */
+.block-container {{
+    max-width: 1450px;
+    padding-top: 2.0rem;
+    padding-bottom: 3.0rem;
+}}
+
+.side-brand {{
+    text-align: center;
+    padding: 16px 8px 24px;
+}}
+
+.side-brand-title {{
+    color: #ddff75;
+    font-size: 31px;
+    font-weight: 700;
+    line-height: 1.05;
+}}
+
+.side-brand-subtitle {{
+    color: #87e8a6;
+    font-size: 15px;
+    margin-top: 9px;
+}}
+
+.sidebar-section {{
+    color: #dff1e5;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+}}
+
+.hero {{
+    text-align: center;
+    padding: 10px 18px 24px;
+}}
 
 .hero-title {{
-    font-size: 48px;
-    font-weight: 900;
-    color: #d9f99d;
-    line-height: 1;
-    margin-bottom: 7px;
+    color: #e7ff7c;
+    font-size: 47px;
+    font-weight: 700;
+    line-height: 1.08;
+    margin: 0;
+    text-shadow: 0 4px 22px rgba(0,0,0,.38);
 }}
 
 .hero-subtitle {{
-    color: #d1d5db;
+    color: #dcece1;
+    font-size: 19px;
+    margin-top: 10px;
+}}
+
+.hero-meta {{
+    color: #82e9a4;
+    font-size: 14px;
+    font-weight: 700;
+    margin-top: 13px;
+}}
+
+.monitor {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+    background: rgba(3, 25, 14, .84);
+    border: 1px solid rgba(128, 255, 170, .17);
+    border-radius: 17px;
+    padding: 15px 20px;
+    margin-bottom: 20px;
+}}
+
+.monitor-left {{
+    color: #e8f4eb;
     font-size: 17px;
-    margin-bottom: 8px;
 }}
 
-.hero-line {{
-    color: #86efac;
-    font-size: 13px;
-    margin-bottom: 22px;
+.monitor-right {{
+    color: #b9c8be;
+    font-size: 14px;
+    text-align: right;
 }}
 
-/* GLASS */
+.live-badge {{
+    display: inline-block;
+    background: #c92828;
+    color: #fff;
+    padding: 4px 10px;
+    border-radius: 16px;
+    font-size: 11px;
+    margin-left: 9px;
+    font-weight: 700;
+}}
 
 .glass {{
-    background:
-        rgba(5,25,14,.72);
-
-    border:
-        1px solid rgba(255,255,255,.11);
-
-    border-radius:
-        20px;
-
-    padding:
-        20px;
-
-    backdrop-filter:
-        blur(16px);
-
-    box-shadow:
-        0 12px 40px rgba(0,0,0,.30);
-
-    color:
-        #f8fafc;
-
-    margin-bottom:
-        16px;
+    background: rgba(4, 25, 15, .80);
+    border: 1px solid rgba(127, 255, 169, .16);
+    border-radius: 20px;
+    padding: 23px;
+    box-shadow: 0 15px 40px rgba(0,0,0,.20);
 }}
 
-/* METRICS */
-
-div[data-testid="stMetric"] {{
-    background:
-        rgba(4,25,13,.78);
-
-    border:
-        1px solid rgba(134,239,172,.12);
-
-    border-radius:
-        16px;
-
-    padding:
-        15px;
-
-    box-shadow:
-        0 8px 25px rgba(0,0,0,.20);
+.section-title {{
+    color: #e5ff8c;
+    font-size: 24px;
+    font-weight: 700;
+    margin: 8px 0 14px;
 }}
 
-div[data-testid="stMetricLabel"] {{
-    color:#a7f3d0 !important;
+.section-text {{
+    color: #d0ded4;
+    font-size: 16px;
+    line-height: 1.7;
 }}
 
-div[data-testid="stMetricValue"] {{
-    color:#ffffff !important;
+.metric-card {{
+    background: rgba(4, 27, 16, .84);
+    border: 1px solid rgba(127, 255, 169, .15);
+    border-radius: 17px;
+    padding: 17px;
+    min-height: 120px;
 }}
 
-/* SECTION */
-
-.section {{
-    color:#d9f99d;
-    font-size:22px;
-    font-weight:800;
-    margin:18px 0 10px 0;
+.metric-label {{
+    color: #b9c9be;
+    font-size: 15px;
 }}
 
-/* RISK */
-
-.risk-box {{
-    background:
-        linear-gradient(
-            135deg,
-            rgba(127,29,29,.78),
-            rgba(20,20,10,.85)
-        );
-
-    border:
-        1px solid rgba(251,146,60,.45);
-
-    border-radius:
-        24px;
-
-    padding:
-        28px;
-
-    text-align:
-        center;
-
-    box-shadow:
-        0 0 40px rgba(249,115,22,.14);
+.metric-value {{
+    color: #fff;
+    font-size: 30px;
+    font-weight: 700;
+    margin-top: 7px;
 }}
 
-.risk-score {{
-    font-size:60px;
-    font-weight:900;
-    color:#ffffff;
+.metric-note {{
+    color: #7ee8a1;
+    font-size: 13px;
+    margin-top: 4px;
 }}
 
-.risk-high {{
-    color:#fb923c;
-    font-size:25px;
-    font-weight:900;
-}}
-
-.risk-critical {{
-    color:#ef4444;
-    font-size:25px;
-    font-weight:900;
-}}
-
-.risk-moderate {{
-    color:#facc15;
-    font-size:25px;
-    font-weight:900;
+.risk-card {{
+    border-radius: 22px;
+    padding: 29px 24px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,.14);
+    min-height: 275px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    box-shadow: 0 18px 50px rgba(0,0,0,.30);
 }}
 
 .risk-low {{
-    color:#4ade80;
-    font-size:25px;
-    font-weight:900;
-}}
-
-/* STATUS */
-
-.live {{
-    display:inline-block;
-    background:#dc2626;
-    color:white;
-    padding:5px 11px;
-    border-radius:20px;
-    font-size:12px;
-    font-weight:800;
-}}
-
-/* BUTTON */
-
-.stButton > button {{
-    border-radius:12px;
     background:
         linear-gradient(
             135deg,
-            #166534,
-            #15803d
+            rgba(11, 91, 49, .95),
+            rgba(5, 52, 31, .96)
         );
-    color:white;
-    border:1px solid #4ade80;
-    font-weight:700;
 }}
 
-.stButton > button:hover {{
-    background:#22c55e;
-    color:#052e16;
+.risk-moderate {{
+    background:
+        linear-gradient(
+            135deg,
+            rgba(118, 76, 5, .95),
+            rgba(70, 42, 3, .96)
+        );
 }}
 
-/* FOOTER */
+.risk-high {{
+    background:
+        linear-gradient(
+            135deg,
+            rgba(148, 61, 10, .96),
+            rgba(76, 26, 7, .97)
+        );
+}}
+
+.risk-critical {{
+    background:
+        linear-gradient(
+            135deg,
+            rgba(150, 31, 24, .97),
+            rgba(72, 10, 10, .98)
+        );
+}}
+
+.risk-title {{
+    color: #fff;
+    font-size: 20px;
+    font-weight: 700;
+}}
+
+.risk-number {{
+    color: #fff;
+    font-size: 61px;
+    font-weight: 700;
+    line-height: 1;
+    margin: 17px 0 9px;
+}}
+
+.risk-level {{
+    color: #fff;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: .5px;
+}}
+
+.risk-note {{
+    color: #e4e9e5;
+    font-size: 14px;
+    margin-top: 10px;
+}}
+
+.band {{
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin: 7px 0;
+    color: #fff;
+    font-size: 14px;
+}}
+
+.band-green {{ background: rgba(28, 139, 76, .75); }}
+.band-yellow {{ background: rgba(179, 132, 19, .80); }}
+.band-orange {{ background: rgba(181, 78, 18, .82); }}
+.band-red {{ background: rgba(177, 39, 33, .84); }}
+
+.info-row {{
+    background: rgba(10, 34, 21, .75);
+    border: 1px solid rgba(127, 255, 169, .11);
+    border-radius: 13px;
+    padding: 13px 15px;
+    margin: 7px 0;
+    color: #d7e3da;
+}}
+
+.info-row strong {{
+    color: #ecff9b;
+}}
+
+.review-card {{
+    background: rgba(4, 24, 15, .82);
+    border-left: 4px solid #9ddc42;
+    border-radius: 12px;
+    padding: 17px 20px;
+    margin: 10px 0;
+}}
+
+.review-title {{
+    color: #e9ff91;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 7px;
+}}
+
+.review-text {{
+    color: #d3dfd6;
+    font-size: 15px;
+    line-height: 1.65;
+}}
 
 .footer {{
-    text-align:center;
-    color:#94a3b8;
-    font-size:12px;
-    padding:25px 0;
+    text-align: center;
+    color: #94aa9a;
+    font-size: 13px;
+    padding: 30px 0 10px;
+}}
+
+[data-testid="stMetricValue"] {{
+    font-family: "Times New Roman", Times, serif !important;
 }}
 
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""")
 
 
-# =========================================================
+# ============================================================
+# FOREST REGIONS
+# ============================================================
+FOREST_REGIONS = {
+    "Dachigam — Jammu & Kashmir": {
+        "lat": 34.0837, "lon": 74.8836, "state": "Jammu & Kashmir"
+    },
+    "Jim Corbett — Uttarakhand": {
+        "lat": 29.5300, "lon": 78.7747, "state": "Uttarakhand"
+    },
+    "Ranthambore — Rajasthan": {
+        "lat": 26.0173, "lon": 76.5026, "state": "Rajasthan"
+    },
+    "Kaziranga — Assam": {
+        "lat": 26.5775, "lon": 93.1711, "state": "Assam"
+    },
+    "Gir — Gujarat": {
+        "lat": 21.1243, "lon": 70.8242, "state": "Gujarat"
+    },
+    "Kanha — Madhya Pradesh": {
+        "lat": 22.3345, "lon": 80.6115, "state": "Madhya Pradesh"
+    },
+    "Tadoba — Maharashtra": {
+        "lat": 20.2510, "lon": 79.3580, "state": "Maharashtra"
+    },
+    "Similipal — Odisha": {
+        "lat": 21.9497, "lon": 86.3700, "state": "Odisha"
+    },
+    "Sundarbans — West Bengal": {
+        "lat": 21.9497, "lon": 88.9000, "state": "West Bengal"
+    },
+    "Bandipur — Karnataka": {
+        "lat": 11.6821, "lon": 76.6300, "state": "Karnataka"
+    },
+    "Nallamala — Andhra Pradesh": {
+        "lat": 15.3793, "lon": 78.4800, "state": "Andhra Pradesh"
+    },
+    "Nagarjunsagar — Telangana": {
+        "lat": 16.5427, "lon": 79.3110, "state": "Telangana"
+    },
+}
+
+
+# ============================================================
+# WEATHER
+# ============================================================
+WEATHER_CODES = {
+    0: "Clear sky",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    48: "Rime fog",
+    51: "Light drizzle",
+    53: "Moderate drizzle",
+    55: "Dense drizzle",
+    61: "Slight rain",
+    63: "Moderate rain",
+    65: "Heavy rain",
+    71: "Slight snow",
+    73: "Moderate snow",
+    75: "Heavy snow",
+    80: "Rain showers",
+    81: "Moderate rain showers",
+    82: "Heavy rain showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm with hail",
+    99: "Thunderstorm with heavy hail",
+}
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_weather(lat, lon):
+    url = "https://api.open-meteo.com/v1/forecast"
+
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "current": (
+            "temperature_2m,"
+            "relative_humidity_2m,"
+            "wind_speed_10m,"
+            "precipitation,"
+            "weather_code"
+        ),
+        "hourly": (
+            "temperature_2m,"
+            "relative_humidity_2m,"
+            "wind_speed_10m,"
+            "precipitation"
+        ),
+        "forecast_days": 1,
+        "timezone": "auto",
+    }
+
+    response = requests.get(url, params=params, timeout=12)
+    response.raise_for_status()
+
+    payload = response.json()
+    current = payload["current"]
+
+    hourly = pd.DataFrame(payload["hourly"])
+    hourly["time"] = pd.to_datetime(hourly["time"])
+
+    current_time = pd.to_datetime(current["time"])
+    hourly = hourly[hourly["time"] >= current_time].head(24).copy()
+
+    return {
+        "temperature": float(current["temperature_2m"]),
+        "humidity": float(current["relative_humidity_2m"]),
+        "wind": float(current["wind_speed_10m"]),
+        "rain": float(current["precipitation"]),
+        "weather_code": int(current["weather_code"]),
+        "weather": WEATHER_CODES.get(
+            int(current["weather_code"]),
+            "Unknown",
+        ),
+        "time": current["time"],
+        "timezone": payload.get("timezone", "Local"),
+        "hourly": hourly,
+    }
+
+
+# ============================================================
 # MODEL
-# =========================================================
-
-
+# ============================================================
 @st.cache_resource
 def train_model():
-
     data = pd.read_csv("forestfires.csv")
 
     required = ["temp", "RH", "wind", "area"]
-
     missing = [c for c in required if c not in data.columns]
 
     if missing:
-        raise ValueError(f"Missing columns: {missing}")
+        raise ValueError(
+            "forestfires.csv is missing: " + ", ".join(missing)
+        )
 
-    data["risk"] = data["area"].apply(lambda x: 1 if x > 0 else 0)
+    data = data.copy()
+    data["risk"] = (data["area"] > 0).astype(int)
 
     features = ["temp", "RH", "wind"]
-
     if "rain" in data.columns:
         features.append("rain")
 
@@ -334,1179 +554,1153 @@ def train_model():
     y = data["risk"]
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.20, random_state=42, stratify=y
+        X,
+        y,
+        test_size=0.20,
+        random_state=42,
+        stratify=y,
     )
 
     model = RandomForestClassifier(
-        n_estimators=300, random_state=42, class_weight="balanced"
+        n_estimators=300,
+        random_state=42,
+        class_weight="balanced",
+        n_jobs=-1,
     )
 
     model.fit(X_train, y_train)
-
-    prediction = model.predict(X_test)
+    predictions = model.predict(X_test)
 
     metrics = {
-        "accuracy": accuracy_score(y_test, prediction),
-        "precision": precision_score(y_test, prediction, zero_division=0),
-        "recall": recall_score(y_test, prediction, zero_division=0),
-        "f1": f1_score(y_test, prediction, zero_division=0),
+        "accuracy": accuracy_score(y_test, predictions),
+        "precision": precision_score(
+            y_test, predictions, zero_division=0
+        ),
+        "recall": recall_score(
+            y_test, predictions, zero_division=0
+        ),
+        "f1": f1_score(
+            y_test, predictions, zero_division=0
+        ),
+        "cm": confusion_matrix(y_test, predictions),
+        "train_size": len(X_train),
+        "test_size": len(X_test),
     }
 
-    matrix = confusion_matrix(y_test, prediction)
-
-    return (data, model, features, metrics, matrix)
+    return data, model, features, metrics
 
 
-try:
-
-    data, model, FEATURES, METRICS, CM = train_model()
-
-except Exception as e:
-
-    st.error("Model loading failed.")
-
-    st.code(str(e))
-
-    st.stop()
+data, model, FEATURES, METRICS = train_model()
 
 
-# =========================================================
-# INDIA FOREST REGIONS
-# =========================================================
-
-FOREST_REGIONS = {
-    "Dachigam — Jammu & Kashmir": (34.0837, 74.9257),
-    "Great Himalayan — Himachal Pradesh": (31.7500, 77.4500),
-    "Jim Corbett — Uttarakhand": (29.5300, 78.7747),
-    "Ranthambore — Rajasthan": (26.0173, 76.5026),
-    "Gir — Gujarat": (21.1243, 70.8242),
-    "Kanha — Madhya Pradesh": (22.3345, 80.6115),
-    "Bandhavgarh — Madhya Pradesh": (23.6850, 81.0300),
-    "Tadoba — Maharashtra": (20.2489, 79.2997),
-    "Similipal — Odisha": (21.9497, 86.3700),
-    "Sundarbans — West Bengal": (21.9497, 89.1833),
-    "Kaziranga — Assam": (26.5775, 93.1711),
-    "Manas — Assam": (26.6594, 91.0011),
-    "Nallamala — Andhra Pradesh": (15.3793, 78.4800),
-    "Nagarjunsagar — Andhra Pradesh": (16.0850, 79.3000),
-    "Bandipur — Karnataka": (11.7401, 76.6800),
-    "Mudumalai — Tamil Nadu": (11.5731, 76.5450),
-    "Periyar — Kerala": (9.4620, 77.2360),
-    "Nilgiri — South India": (11.4064, 76.6932),
-}
-
-
-# =========================================================
-# WEATHER
-# =========================================================
-
-
-def weather_name(code):
-
-    names = {
-        0: "Clear Sky",
-        1: "Mainly Clear",
-        2: "Partly Cloudy",
-        3: "Overcast",
-        45: "Fog",
-        48: "Fog",
-        51: "Light Drizzle",
-        53: "Moderate Drizzle",
-        55: "Heavy Drizzle",
-        61: "Light Rain",
-        63: "Moderate Rain",
-        65: "Heavy Rain",
-        71: "Snow",
-        73: "Snow",
-        75: "Heavy Snow",
-        80: "Rain Showers",
-        81: "Rain Showers",
-        82: "Heavy Rain Showers",
-        95: "Thunderstorm",
-        96: "Thunderstorm",
-        99: "Thunderstorm",
-    }
-
-    return names.get(int(code), "Unknown")
-
-
-@st.cache_data(ttl=600)
-def get_weather(lat, lon):
-
-    url = "https://api.open-meteo.com/v1/forecast"
-
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "current": "temperature_2m,"
-        "relative_humidity_2m,"
-        "wind_speed_10m,"
-        "precipitation,"
-        "weather_code",
-        "hourly": "temperature_2m,"
-        "relative_humidity_2m,"
-        "wind_speed_10m,"
-        "precipitation",
-        "forecast_days": 1,
-        "timezone": "auto",
-    }
-
-    r = requests.get(url, params=params, timeout=15)
-
-    r.raise_for_status()
-
-    result = r.json()
-
-    current = result["current"]
-
-    hourly = pd.DataFrame(result["hourly"])
-
-    hourly["time"] = pd.to_datetime(hourly["time"])
-
-    return {
-        "temp": float(current["temperature_2m"]),
-        "humidity": float(current["relative_humidity_2m"]),
-        "wind": float(current["wind_speed_10m"]),
-        "rain": float(current["precipitation"]),
-        "weather": weather_name(current["weather_code"]),
-        "time": current["time"],
-        "hourly": hourly,
-    }
-
-
-# =========================================================
+# ============================================================
 # RISK
-# =========================================================
+# ============================================================
+def risk_result(temp, humidity, wind, rain):
+    values = {
+        "temp": temp,
+        "RH": humidity,
+        "wind": wind,
+        "rain": rain,
+    }
+
+    row = pd.DataFrame(
+        [[values[f] for f in FEATURES]],
+        columns=FEATURES,
+    )
+
+    probabilities = model.predict_proba(row)[0]
+    positive_index = list(model.classes_).index(1)
+    score = float(probabilities[positive_index] * 100)
+
+    if score < 25:
+        level, css = "LOW", "risk-low"
+    elif score < 50:
+        level, css = "MODERATE", "risk-moderate"
+    elif score < 75:
+        level, css = "HIGH", "risk-high"
+    else:
+        level, css = "CRITICAL", "risk-critical"
+
+    return score, level, css
 
 
-def risk_score(temp, humidity, wind, rain):
-
-    values = {"temp": temp, "RH": humidity, "wind": wind, "rain": rain}
-
-    frame = pd.DataFrame([values])
-
-    frame = frame[FEATURES]
-
-    probabilities = model.predict_proba(frame)[0]
-
-    classes = list(model.classes_)
-
-    fire_index = classes.index(1)
-
-    return round(probabilities[fire_index] * 100, 1)
-
-
-def risk_level(score):
-
+def map_rgb(score):
     if score >= 75:
-        return "CRITICAL"
-
+        return [190, 35, 35]
     if score >= 50:
-        return "HIGH"
-
+        return [230, 100, 25]
     if score >= 25:
-        return "MODERATE"
-
-    return "LOW"
-
-
-def risk_color(score):
-
-    if score >= 75:
-        return [239, 68, 68]
-
-    if score >= 50:
-        return [249, 115, 22]
-
-    if score >= 25:
-        return [250, 204, 21]
-
-    return [34, 197, 94]
+        return [220, 175, 40]
+    return [35, 155, 80]
 
 
-# =========================================================
-# EXPLANATION
-# =========================================================
-
-
-def risk_reasons(temp, humidity, wind, rain):
-
-    reasons = []
+def environmental_factors(temp, humidity, wind, rain):
+    result = []
 
     if temp >= 35:
-        reasons.append("🌡️ High temperature")
-
+        result.append(
+            ("Temperature", "High temperature is contributing to dry conditions.")
+        )
     elif temp >= 30:
-        reasons.append("🌡️ Warm conditions")
+        result.append(
+            ("Temperature", "Warm conditions may increase fire susceptibility.")
+        )
+    else:
+        result.append(
+            ("Temperature", "Temperature is not currently in the high-risk range.")
+        )
 
     if humidity <= 30:
-        reasons.append("💧 Very low humidity")
-
-    elif humidity <= 40:
-        reasons.append("💧 Low humidity")
+        result.append(
+            ("Humidity", "Very low humidity indicates dry atmospheric conditions.")
+        )
+    elif humidity <= 45:
+        result.append(
+            ("Humidity", "Lower humidity can support ignition and drying.")
+        )
+    else:
+        result.append(
+            ("Humidity", "Humidity is providing some resistance to rapid drying.")
+        )
 
     if wind >= 25:
-        reasons.append("💨 Strong wind")
-
+        result.append(
+            ("Wind", "Strong winds can accelerate fire spread.")
+        )
     elif wind >= 15:
-        reasons.append("💨 Moderate wind")
+        result.append(
+            ("Wind", "Moderate winds may support fire spread.")
+        )
+    else:
+        result.append(
+            ("Wind", "Wind speed is currently relatively low.")
+        )
 
     if rain <= 0.1:
-        reasons.append("🌧️ Little/no rainfall")
+        result.append(
+            ("Rainfall", "Little or no current rainfall is present.")
+        )
+    else:
+        result.append(
+            ("Rainfall", "Current rainfall can reduce immediate fire susceptibility.")
+        )
 
-    if not reasons:
-        reasons.append("🌿 Relatively stable conditions")
-
-    return reasons
+    return result
 
 
 def recommendations(score):
-
     if score >= 75:
-
         return [
-            "🚨 Increase monitoring frequency",
-            "🔥 Avoid activities that create sparks",
-            "🌲 Monitor dry vegetation closely",
-            "📞 Follow official emergency guidance",
+            "Increase monitoring frequency.",
+            "Avoid unnecessary open-fire activities.",
+            "Keep response teams prepared.",
+            "Follow local forest and emergency advisories.",
         ]
 
     if score >= 50:
-
         return [
-            "⚠️ Increase environmental monitoring",
-            "🔥 Avoid unnecessary burning",
-            "🌲 Monitor dry vegetation",
-            "💨 Watch wind conditions",
+            "Maintain enhanced monitoring.",
+            "Avoid burning dry vegetation.",
+            "Watch for changes in wind and humidity.",
+            "Review local forest safety procedures.",
         ]
 
     if score >= 25:
-
         return [
-            "👀 Continue regular monitoring",
-            "🌿 Watch temperature changes",
-            "💧 Monitor rainfall and humidity",
+            "Continue routine monitoring.",
+            "Avoid uncontrolled fires near dry vegetation.",
+            "Recheck conditions if temperature rises or humidity falls.",
         ]
 
     return [
-        "✅ Current modeled risk is relatively low",
-        "🌿 Continue routine monitoring",
+        "Continue routine forest monitoring.",
+        "Maintain preventive fire-safety practices.",
+        "Reassess if weather conditions change significantly.",
     ]
 
 
-# =========================================================
+# ============================================================
 # SIDEBAR
-# =========================================================
+# ============================================================
+with st.sidebar:
 
-st.sidebar.markdown(
-    """
-<div style="
-font-size:29px;
-font-weight:900;
-color:#d9f99d;
-">
-🌲 EcoShield AI
-</div>
-
-<div style="
-font-size:12px;
-color:#86efac;
-margin-bottom:20px;
-">
-India's Forest Fire Intelligence
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
-
-page = st.sidebar.radio(
-    "NAVIGATION",
-    [
-        "🏠 Dashboard",
-        "🇮🇳 India Forest Map",
-        "🔥 Risk Prediction",
-        "🌤️ Live Weather",
-        "📊 Analytics",
-        "🛡️ Safety & Awareness",
-        "ℹ️ About Project",
-    ],
-)
-
-
-st.sidebar.markdown("---")
-
-
-selected_region = st.sidebar.selectbox(
-    "📍 MONITORING REGION", list(FOREST_REGIONS.keys())
-)
-
-
-st.sidebar.markdown("---")
-
-
-if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
-
-    st.cache_data.clear()
-    st.rerun()
-
-
-st.sidebar.markdown(
-    """
-<div style="
-font-size:12px;
-color:#94a3b8;
-line-height:1.8;
-margin-top:25px;
-">
-🟢 LIVE WEATHER<br>
-🌐 Open-Meteo API<br>
-🤖 Random Forest ML<br>
-🇮🇳 Pan-India Coverage
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
-
-# =========================================================
-# SELECTED LOCATION
-# =========================================================
-
-lat, lon = FOREST_REGIONS[selected_region]
-
-
-# =========================================================
-# DASHBOARD
-# =========================================================
-
-if page == "🏠 Dashboard":
-
-    try:
-
-        weather = get_weather(lat, lon)
-
-    except Exception as e:
-
-        st.error("Live weather connection failed.")
-
-        st.code(str(e))
-
-        st.stop()
-
-    temp = weather["temp"]
-    humidity = weather["humidity"]
-    wind = weather["wind"]
-    rain = weather["rain"]
-
-    score = risk_score(temp, humidity, wind, rain)
-
-    level = risk_level(score)
-
-    # HERO
+    html("""
+    <div class="side-brand">
+        <div class="side-brand-title">EcoShield AI</div>
+        <div class="side-brand-subtitle">
+            India's Forest Fire Intelligence
+        </div>
+    </div>
+    """)
 
     st.markdown(
-        '<div class="hero-title">' "🌲 EcoShield AI" "</div>", unsafe_allow_html=True
-    )
-
-    st.markdown(
-        '<div class="hero-subtitle">'
-        "India's Forest Fire Risk Intelligence Platform"
-        "</div>",
+        '<div class="sidebar-section">NAVIGATION</div>',
         unsafe_allow_html=True,
     )
 
+    page = st.radio(
+        "Navigation",
+        [
+            "Dashboard",
+            "Forest Map",
+            "Risk Prediction",
+            "Live Weather",
+            "Model Analytics",
+            "Safety & Awareness",
+            "About Project",
+        ],
+        label_visibility="collapsed",
+    )
+
+    st.markdown("---")
+
     st.markdown(
-        '<div class="hero-line">'
-        "🟢 LIVE MONITORING &nbsp; | &nbsp; "
-        "🤖 AI-POWERED PREDICTION &nbsp; | &nbsp; "
-        "🇮🇳 PAN-INDIA FOREST COVERAGE"
-        "</div>",
+        '<div class="sidebar-section">MONITORING REGION</div>',
         unsafe_allow_html=True,
     )
 
-    # TOP STATUS
-
-    st.markdown(
-        f"""
-<div class="glass">
-<b>📍 Monitoring:</b> {selected_region}
-&nbsp;&nbsp;&nbsp;
-<span class="live">● LIVE</span>
-&nbsp;&nbsp;&nbsp;
-<b>🕒 Updated:</b> {weather['time']}
-</div>
-""",
-        unsafe_allow_html=True,
+    selected_region = st.selectbox(
+        "Select Forest Region",
+        list(FOREST_REGIONS.keys()),
     )
 
-    # METRICS
+    st.markdown("---")
 
-    c1, c2, c3, c4 = st.columns(4)
+    if st.button(
+        "Refresh Live Data",
+        use_container_width=True,
+    ):
+        st.cache_data.clear()
+        st.rerun()
 
-    with c1:
-        st.metric("🌡️ Temperature", f"{temp:.1f} °C")
+    st.caption("Weather source: Open-Meteo")
+    st.caption("Model: Random Forest")
+    st.caption("Coverage: Selected Indian forest regions")
 
-    with c2:
-        st.metric("💧 Humidity", f"{humidity:.0f} %")
 
-    with c3:
-        st.metric("💨 Wind Speed", f"{wind:.1f} km/h")
+# ============================================================
+# CURRENT REGION DATA
+# ============================================================
+selected = FOREST_REGIONS[selected_region]
 
-    with c4:
-        st.metric("🌧️ Rainfall", f"{rain:.1f} mm")
+try:
+    current_weather = get_weather(
+        selected["lat"],
+        selected["lon"],
+    )
 
-    st.markdown("")
+    temperature = current_weather["temperature"]
+    humidity = current_weather["humidity"]
+    wind = current_weather["wind"]
+    rain = current_weather["rain"]
 
-    # RISK + WEATHER
+    current_score, current_level, current_css = risk_result(
+        temperature,
+        humidity,
+        wind,
+        rain,
+    )
 
-    left, right = st.columns([1, 1])
+except Exception as exc:
+    st.error(
+        "Unable to load live weather. Check your internet connection "
+        "and press Refresh Live Data."
+    )
+    st.caption(str(exc))
+    st.stop()
+
+
+# ============================================================
+# PAGE: DASHBOARD
+# ============================================================
+if page == "Dashboard":
+
+    html("""
+    <div class="hero">
+        <div class="hero-title">EcoShield AI</div>
+        <div class="hero-subtitle">
+            India's Forest Fire Risk Intelligence Platform
+        </div>
+        <div class="hero-meta">
+            LIVE ENVIRONMENTAL MONITORING &nbsp; | &nbsp;
+            MACHINE LEARNING RISK ESTIMATION &nbsp; | &nbsp;
+            FOREST REGION COVERAGE
+        </div>
+    </div>
+    """)
+
+    html(f"""
+    <div class="monitor">
+        <div class="monitor-left">
+            Monitoring: <b>{selected_region}</b>
+            <span class="live-badge">LIVE</span>
+        </div>
+        <div class="monitor-right">
+            Updated: <b>{current_weather["time"]}</b>
+        </div>
+    </div>
+    """)
+
+    m1, m2, m3, m4 = st.columns(4)
+
+    metric_data = [
+        ("Temperature", f"{temperature:.1f} °C", "Current condition"),
+        ("Humidity", f"{humidity:.0f} %", "Relative humidity"),
+        ("Wind Speed", f"{wind:.1f} km/h", "Current wind"),
+        ("Rainfall", f"{rain:.1f} mm", "Current precipitation"),
+    ]
+
+    for column, (label, value, note) in zip(
+        [m1, m2, m3, m4],
+        metric_data,
+    ):
+        with column:
+            html(f"""
+            <div class="metric-card">
+                <div class="metric-label">{label}</div>
+                <div class="metric-value">{value}</div>
+                <div class="metric-note">{note}</div>
+            </div>
+            """)
+
+    st.write("")
+
+    left, right = st.columns([1.05, .95], gap="large")
 
     with left:
-
-        level_class = (
-            "risk-critical"
-            if level == "CRITICAL"
-            else (
-                "risk-high"
-                if level == "HIGH"
-                else "risk-moderate" if level == "MODERATE" else "risk-low"
-            )
-        )
-
-        st.markdown(
-            f"""
-<div class="risk-box">
-<div style="
-font-size:16px;
-color:#fed7aa;
-font-weight:700;
-">
-🔥 FOREST FIRE RISK
-</div>
-
-<div class="risk-score">
-{score:.0f}<span style="font-size:22px;"> / 100</span>
-</div>
-
-<div class="{level_class}">
-{level} RISK
-</div>
-
-<div style="
-color:#cbd5e1;
-font-size:13px;
-margin-top:10px;
-">
-Random Forest environmental risk estimate
-</div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-        st.progress(int(score))
+        html(f"""
+        <div class="risk-card {current_css}">
+            <div class="risk-title">FOREST FIRE RISK</div>
+            <div class="risk-number">
+                {current_score:.0f}
+                <span style="font-size:24px;">/100</span>
+            </div>
+            <div class="risk-level">{current_level} RISK</div>
+            <div class="risk-note">
+                Random Forest environmental risk estimate
+            </div>
+        </div>
+        """)
 
     with right:
+        html(f"""
+        <div class="glass">
+            <div class="section-title">Live Weather Report</div>
+            <div class="section-text">
+                Temperature: <b>{temperature:.1f} °C</b><br>
+                Relative Humidity: <b>{humidity:.0f}%</b><br>
+                Wind Speed: <b>{wind:.1f} km/h</b><br>
+                Rainfall: <b>{rain:.1f} mm</b><br>
+                Condition: <b>{current_weather["weather"]}</b><br><br>
+                Region: <b>{selected_region}</b><br>
+                Weather Source: <b>Open-Meteo</b>
+            </div>
+        </div>
+        """)
 
-        st.markdown(
-            f"""
-<div class="glass">
-<h3>🌤️ Live Weather Report</h3>
+    st.markdown("### Environmental Factors")
 
-<p>🌡️ <b>{temp:.1f} °C</b> — Temperature</p>
-<p>💧 <b>{humidity:.0f}%</b> — Relative Humidity</p>
-<p>💨 <b>{wind:.1f} km/h</b> — Wind Speed</p>
-<p>🌧️ <b>{rain:.1f} mm</b> — Rainfall</p>
-<p>☁️ <b>{weather['weather']}</b></p>
+    for name, explanation in environmental_factors(
+        temperature,
+        humidity,
+        wind,
+        rain,
+    ):
+        html(f"""
+        <div class="info-row">
+            <strong>{name}</strong> — {explanation}
+        </div>
+        """)
 
-<hr>
+    st.markdown("### Risk Classification")
 
-<p style="color:#86efac;">
-📍 {selected_region}
-</p>
+    html("""
+    <div class="band band-green"><b>0–24</b> &nbsp; Low — routine monitoring</div>
+    <div class="band band-yellow"><b>25–49</b> &nbsp; Moderate — increased awareness</div>
+    <div class="band band-orange"><b>50–74</b> &nbsp; High — enhanced monitoring</div>
+    <div class="band band-red"><b>75–100</b> &nbsp; Critical — high-priority monitoring</div>
+    """)
 
-<p style="color:#94a3b8;font-size:12px;">
-Source: Open-Meteo API
-</p>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
+    st.markdown("### Next 24-Hour Risk Trend")
 
-    # TREND + EXPLANATION
+    hourly = current_weather["hourly"].copy()
 
-    left2, right2 = st.columns([1.2, 0.8])
-
-    with left2:
-
-        st.markdown(
-            '<div class="section">' "📈 24-Hour Fire Risk Trend" "</div>",
-            unsafe_allow_html=True,
-        )
-
-        hourly = weather["hourly"].copy()
-
-        trend_rows = []
+    if not hourly.empty:
+        trend_scores = []
 
         for _, row in hourly.iterrows():
-
-            s = risk_score(
-                row["temperature_2m"],
-                row["relative_humidity_2m"],
-                row["wind_speed_10m"],
-                row["precipitation"],
+            s, _, _ = risk_result(
+                float(row["temperature_2m"]),
+                float(row["relative_humidity_2m"]),
+                float(row["wind_speed_10m"]),
+                float(row["precipitation"]),
             )
+            trend_scores.append(s)
 
-            trend_rows.append({"Time": row["time"], "Risk Score": s})
+        trend = pd.DataFrame({
+            "Time": hourly["time"],
+            "Risk Score": trend_scores,
+        })
 
-        trend = pd.DataFrame(trend_rows)
-
-        if not trend.empty:
-
-            st.line_chart(trend.set_index("Time")["Risk Score"], height=310)
-
-    with right2:
-
-        st.markdown(
-            '<div class="section">' "💡 Why is the Risk at This Level?" "</div>",
-            unsafe_allow_html=True,
+        st.line_chart(
+            trend.set_index("Time"),
+            y="Risk Score",
         )
 
-        st.markdown('<div class="glass">', unsafe_allow_html=True)
 
-        for reason in risk_reasons(temp, humidity, wind, rain):
-            st.write(reason)
+# ============================================================
+# PAGE: FOREST MAP
+# ============================================================
+elif page == "Forest Map":
 
-        st.markdown("</div>", unsafe_allow_html=True)
+    html("""
+    <div class="hero">
+        <div class="hero-title">Forest Risk Map</div>
+        <div class="hero-subtitle">
+            Live weather and model risk across selected Indian forest regions
+        </div>
+    </div>
+    """)
 
-        st.markdown(
-            '<div class="section">' "🛡️ Recommended Actions" "</div>",
-            unsafe_allow_html=True,
-        )
-
-        for action in recommendations(score):
-            st.write(action)
-
-    # INDIA SUMMARY
-
-    st.markdown(
-        '<div class="section">' "🇮🇳 EcoShield Monitoring Network" "</div>",
-        unsafe_allow_html=True,
-    )
-
-    s1, s2, s3, s4 = st.columns(4)
-
-    with s1:
-        st.metric("🌲 Forest Regions", len(FOREST_REGIONS))
-
-    with s2:
-        st.metric("🤖 ML Algorithm", "Random Forest")
-
-    with s3:
-        st.metric("🌐 Weather Source", "Open-Meteo")
-
-    with s4:
-        st.metric("📡 Monitoring", "Live")
-
-    # DOWNLOAD
-
-    report = f"""
-ECOSHIELD AI
-INDIA FOREST FIRE RISK REPORT
-====================================
-
-Region:
-{selected_region}
-
-Temperature:
-{temp:.1f} °C
-
-Humidity:
-{humidity:.1f} %
-
-Wind:
-{wind:.1f} km/h
-
-Rainfall:
-{rain:.1f} mm
-
-Weather:
-{weather['weather']}
-
-Risk Score:
-{score:.1f}/100
-
-Risk Level:
-{level}
-
-Generated:
-{weather['time']}
-
-Weather Source:
-Open-Meteo
-
-Model:
-Random Forest
-
-NOTE:
-Academic prototype only.
-Not an official wildfire warning system.
-"""
-
-    st.download_button(
-        "📥 Download Current Risk Report",
-        report,
-        file_name="EcoShield_Risk_Report.txt",
-        mime="text/plain",
-    )
-
-
-# =========================================================
-# INDIA MAP
-# =========================================================
-
-elif page == "🇮🇳 India Forest Map":
-
-    st.markdown(
-        '<div class="hero-title">' "🇮🇳 India Forest Fire Risk Map" "</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<div class="hero-subtitle">'
-        "Live environmental risk across major forest regions"
-        "</div>",
-        unsafe_allow_html=True,
+    st.info(
+        "Move your cursor over a colored forest marker to see its "
+        "location, risk level and live weather details."
     )
 
     rows = []
+    failures = []
 
-    failed = []
+    with st.spinner("Loading live forest-region conditions..."):
 
-    with st.spinner("🌐 Fetching live weather across India..."):
-
-        for name, coords in FOREST_REGIONS.items():
-
+        for name, info in FOREST_REGIONS.items():
             try:
+                w = get_weather(info["lat"], info["lon"])
 
-                w = get_weather(coords[0], coords[1])
-
-                s = risk_score(w["temp"], w["humidity"], w["wind"], w["rain"])
-
-                rows.append(
-                    {
-                        "region": name,
-                        "lat": coords[0],
-                        "lon": coords[1],
-                        "temperature": round(w["temp"], 1),
-                        "humidity": round(w["humidity"], 1),
-                        "wind": round(w["wind"], 1),
-                        "rain": round(w["rain"], 1),
-                        "risk": round(s, 1),
-                        "level": risk_level(s),
-                        "color": risk_color(s),
-                    }
+                score, level, _ = risk_result(
+                    w["temperature"],
+                    w["humidity"],
+                    w["wind"],
+                    w["rain"],
                 )
 
+                rows.append({
+                    "Region": name,
+                    "State": info["state"],
+                    "lat": info["lat"],
+                    "lon": info["lon"],
+                    "Temperature": round(w["temperature"], 1),
+                    "Humidity": round(w["humidity"], 0),
+                    "Wind": round(w["wind"], 1),
+                    "Rainfall": round(w["rain"], 1),
+                    "Condition": w["weather"],
+                    "Risk": round(score, 1),
+                    "Level": level,
+                    "Color": map_rgb(score),
+                    "Updated": w["time"],
+                })
+
             except Exception:
-                failed.append(name)
+                failures.append(name)
 
     map_df = pd.DataFrame(rows)
 
-    if not map_df.empty:
+    if map_df.empty:
+        st.error("No forest-region weather data could be loaded.")
+    else:
 
-        # SUMMARY
-
-        low = len(map_df[map_df["level"] == "LOW"])
-
-        moderate = len(map_df[map_df["level"] == "MODERATE"])
-
-        high = len(map_df[map_df["level"] == "HIGH"])
-
-        critical = len(map_df[map_df["level"] == "CRITICAL"])
-
-        a, b, c, d = st.columns(4)
-
-        with a:
-            st.metric("🟢 Low", low)
-
-        with b:
-            st.metric("🟡 Moderate", moderate)
-
-        with c:
-            st.metric("🟠 High", high)
-
-        with d:
-            st.metric("🔴 Critical", critical)
-
-        if PYDECK:
+        if PYDECK_AVAILABLE:
 
             layer = pdk.Layer(
                 "ScatterplotLayer",
                 data=map_df,
                 get_position="[lon, lat]",
-                get_fill_color="color",
-                get_radius=45000,
+                get_fill_color="Color",
+                get_line_color=[255, 255, 255],
+                get_line_width=2,
+                get_radius=42000,
                 pickable=True,
                 auto_highlight=True,
             )
 
-            view = pdk.ViewState(latitude=20.5, longitude=78.9, zoom=4.2)
+            view_state = pdk.ViewState(
+                latitude=21.0,
+                longitude=79.0,
+                zoom=4.25,
+                pitch=0,
+            )
 
             tooltip = {
                 "html": """
-                <b>{region}</b><br/>
-                🌡️ {temperature} °C<br/>
-                💧 {humidity}%<br/>
-                💨 {wind} km/h<br/>
-                🌧️ {rain} mm<br/>
-                🔥 Risk: {risk}/100<br/>
-                Status: {level}
-                """,
-                "style": {"backgroundColor": "#07180e", "color": "white"},
+                <div style="
+                    font-family: Arial, sans-serif;
+                    min-width: 250px;
+                    padding: 8px;
+                ">
+                    <div style="
+                        font-size: 17px;
+                        font-weight: 700;
+                        margin-bottom: 8px;
+                    ">
+                        {Region}
+                    </div>
+
+                    <div><b>State:</b> {State}</div>
+                    <div><b>Risk:</b> {Risk}/100 ({Level})</div>
+                    <hr>
+                    <div><b>Temperature:</b> {Temperature} °C</div>
+                    <div><b>Humidity:</b> {Humidity} %</div>
+                    <div><b>Wind Speed:</b> {Wind} km/h</div>
+                    <div><b>Rainfall:</b> {Rainfall} mm</div>
+                    <div><b>Condition:</b> {Condition}</div>
+                    <div><b>Updated:</b> {Updated}</div>
+                </div>
+                """
             }
 
-            deck = pdk.Deck(layers=[layer], initial_view_state=view, tooltip=tooltip)
+            deck = pdk.Deck(
+                layers=[layer],
+                initial_view_state=view_state,
+                tooltip=tooltip,
+                map_provider="carto",
+                map_style="light",
+            )
 
-            st.pydeck_chart(deck, use_container_width=True)
+            st.pydeck_chart(
+                deck,
+                use_container_width=True,
+            )
 
         else:
+            st.warning(
+                "Install pydeck to enable hover details on forest markers."
+            )
+            st.map(
+                map_df,
+                latitude="lat",
+                longitude="lon",
+                size=120,
+            )
 
-            st.map(map_df[["lat", "lon"]], use_container_width=True)
-
-        st.markdown(
-            '<div class="section">' "📋 Regional Risk Table" "</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown("### Regional Risk Details")
 
         table = map_df[
-            ["region", "temperature", "humidity", "wind", "rain", "risk", "level"]
-        ].copy()
-
-        table.columns = [
-            "Forest Region",
-            "Temp °C",
-            "Humidity %",
-            "Wind km/h",
-            "Rain mm",
-            "Risk /100",
-            "Status",
-        ]
-
-        st.dataframe(table, use_container_width=True, hide_index=True)
-
-    if failed:
-
-        st.warning(f"Weather unavailable for {len(failed)} region(s).")
-
-
-# =========================================================
-# RISK PREDICTION
-# =========================================================
-
-elif page == "🔥 Risk Prediction":
-
-    st.markdown(
-        '<div class="hero-title">' "🔥 AI Fire Risk Prediction" "</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<div class="hero-subtitle">'
-        "Enter environmental conditions and estimate fire risk"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown('<div class="glass">', unsafe_allow_html=True)
-
-    c1, c2 = st.columns(2)
-
-    with c1:
-
-        input_temp = st.slider("🌡️ Temperature °C", 0.0, 50.0, 30.0, 0.5)
-
-        input_humidity = st.slider("💧 Relative Humidity %", 0.0, 100.0, 45.0, 1.0)
-
-    with c2:
-
-        input_wind = st.slider("💨 Wind Speed km/h", 0.0, 60.0, 15.0, 1.0)
-
-        input_rain = st.slider("🌧️ Rainfall mm", 0.0, 30.0, 0.0, 0.1)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if st.button("🔥 Calculate Fire Risk", use_container_width=True):
-
-        result = risk_score(input_temp, input_humidity, input_wind, input_rain)
-
-        level = risk_level(result)
-
-        st.markdown(
-            f"""
-<div class="risk-box">
-<div style="
-font-size:16px;
-color:#fed7aa;
-">
-AI PREDICTION
-</div>
-
-<div class="risk-score">
-{result:.0f}/100
-</div>
-
-<div class="risk-high">
-{level} RISK
-</div>
-</div>
-""",
-            unsafe_allow_html=True,
+            [
+                "Region",
+                "State",
+                "Temperature",
+                "Humidity",
+                "Wind",
+                "Rainfall",
+                "Condition",
+                "Risk",
+                "Level",
+            ]
+        ].sort_values(
+            "Risk",
+            ascending=False,
         )
 
-        st.markdown(
-            '<div class="section">' "💡 Environmental Factors" "</div>",
-            unsafe_allow_html=True,
+        st.dataframe(
+            table,
+            use_container_width=True,
+            hide_index=True,
         )
 
-        for item in risk_reasons(input_temp, input_humidity, input_wind, input_rain):
-            st.write(item)
+    if failures:
+        st.warning(
+            f"Live weather was unavailable for {len(failures)} region(s)."
+        )
 
 
-# =========================================================
-# LIVE WEATHER
-# =========================================================
+# ============================================================
+# PAGE: RISK PREDICTION
+# ============================================================
+elif page == "Risk Prediction":
 
-elif page == "🌤️ Live Weather":
+    html("""
+    <div class="hero">
+        <div class="hero-title">Fire Risk Prediction</div>
+        <div class="hero-subtitle">
+            Compare current conditions with a custom environmental scenario
+        </div>
+    </div>
+    """)
 
-    st.markdown(
-        '<div class="hero-title">' "🌤️ Live Weather Intelligence" "</div>",
-        unsafe_allow_html=True,
+    html(f"""
+    <div class="glass">
+        <div class="section-title">Current Live Conditions</div>
+        <div class="section-text">
+            {selected_region} &nbsp; | &nbsp;
+            Temperature: <b>{temperature:.1f} °C</b> &nbsp; | &nbsp;
+            Humidity: <b>{humidity:.0f}%</b> &nbsp; | &nbsp;
+            Wind: <b>{wind:.1f} km/h</b> &nbsp; | &nbsp;
+            Rainfall: <b>{rain:.1f} mm</b>
+        </div>
+    </div>
+    """)
+
+    st.markdown("### Scenario Analysis")
+
+    s1, s2 = st.columns(2)
+
+    with s1:
+        temp_input = st.slider(
+            "Temperature °C",
+            0.0,
+            50.0,
+            float(temperature),
+            0.1,
+        )
+
+        humidity_input = st.slider(
+            "Relative Humidity %",
+            0.0,
+            100.0,
+            float(humidity),
+            1.0,
+        )
+
+    with s2:
+        wind_input = st.slider(
+            "Wind Speed km/h",
+            0.0,
+            100.0,
+            float(wind),
+            0.1,
+        )
+
+        rain_input = st.slider(
+            "Rainfall mm",
+            0.0,
+            50.0,
+            float(min(rain, 50)),
+            0.1,
+        )
+
+    scenario_score, scenario_level, scenario_css = risk_result(
+        temp_input,
+        humidity_input,
+        wind_input,
+        rain_input,
     )
 
-    st.markdown(
-        '<div class="hero-subtitle">'
-        "Current environmental conditions from Open-Meteo"
-        "</div>",
-        unsafe_allow_html=True,
+    st.markdown("### Prediction Result")
+
+    a, b = st.columns([1, 1], gap="large")
+
+    with a:
+        html(f"""
+        <div class="risk-card {scenario_css}">
+            <div class="risk-title">AI RISK ESTIMATE</div>
+            <div class="risk-number">
+                {scenario_score:.0f}
+                <span style="font-size:24px;">/100</span>
+            </div>
+            <div class="risk-level">{scenario_level} RISK</div>
+            <div class="risk-note">
+                Estimated from the selected environmental inputs
+            </div>
+        </div>
+        """)
+
+    with b:
+        difference = scenario_score - current_score
+
+        if difference > 0:
+            direction = "higher"
+            change_text = f"{abs(difference):.1f} points higher"
+        elif difference < 0:
+            direction = "lower"
+            change_text = f"{abs(difference):.1f} points lower"
+        else:
+            direction = "the same"
+            change_text = "no change"
+
+        html(f"""
+        <div class="glass">
+            <div class="section-title">Live vs Scenario</div>
+            <div class="info-row">
+                Current live risk: <strong>{current_score:.1f}/100</strong>
+            </div>
+            <div class="info-row">
+                Scenario risk: <strong>{scenario_score:.1f}/100</strong>
+            </div>
+            <div class="info-row">
+                Scenario is <strong>{direction}</strong> by
+                <strong>{change_text}</strong>.
+            </div>
+        </div>
+        """)
+
+    st.markdown("### Environmental Impact Review")
+
+    for name, explanation in environmental_factors(
+        temp_input,
+        humidity_input,
+        wind_input,
+        rain_input,
+    ):
+        html(f"""
+        <div class="info-row">
+            <strong>{name}</strong> — {explanation}
+        </div>
+        """)
+
+    st.markdown("### Suggested Action")
+
+    for item in recommendations(scenario_score):
+        st.write("• " + item)
+
+
+# ============================================================
+# PAGE: LIVE WEATHER
+# ============================================================
+elif page == "Live Weather":
+
+    html("""
+    <div class="hero">
+        <div class="hero-title">Live Weather</div>
+        <div class="hero-subtitle">
+            Current atmospheric conditions for the selected forest region
+        </div>
+    </div>
+    """)
+
+    html(f"""
+    <div class="glass">
+        <div class="section-title">{selected_region}</div>
+
+        <div class="info-row">
+            <strong>Temperature:</strong> {temperature:.1f} °C
+        </div>
+
+        <div class="info-row">
+            <strong>Relative Humidity:</strong> {humidity:.0f} %
+        </div>
+
+        <div class="info-row">
+            <strong>Wind Speed:</strong> {wind:.1f} km/h
+        </div>
+
+        <div class="info-row">
+            <strong>Rainfall:</strong> {rain:.1f} mm
+        </div>
+
+        <div class="info-row">
+            <strong>Condition:</strong> {current_weather["weather"]}
+        </div>
+
+        <div class="info-row">
+            <strong>API Update:</strong> {current_weather["time"]}
+        </div>
+
+        <div class="info-row">
+            <strong>Timezone:</strong> {current_weather["timezone"]}
+        </div>
+    </div>
+    """)
+
+    st.markdown("### Next 24 Hours")
+
+    hourly = current_weather["hourly"].copy()
+
+    if not hourly.empty:
+        chart_df = hourly[
+            [
+                "time",
+                "temperature_2m",
+                "relative_humidity_2m",
+                "wind_speed_10m",
+                "precipitation",
+            ]
+        ].rename(
+            columns={
+                "time": "Time",
+                "temperature_2m": "Temperature °C",
+                "relative_humidity_2m": "Humidity %",
+                "wind_speed_10m": "Wind km/h",
+                "precipitation": "Rain mm",
+            }
+        )
+
+        st.line_chart(
+            chart_df.set_index("Time")
+        )
+
+
+# ============================================================
+# PAGE: MODEL ANALYTICS
+# ============================================================
+elif page == "Model Analytics":
+
+    html("""
+    <div class="hero">
+        <div class="hero-title">Model Analytics</div>
+        <div class="hero-subtitle">
+            How the Random Forest model was trained and evaluated
+        </div>
+    </div>
+    """)
+
+    st.markdown("### Model Performance")
+
+    a, b, c, d = st.columns(4)
+
+    metrics_to_show = [
+        (a, "Accuracy", METRICS["accuracy"]),
+        (b, "Precision", METRICS["precision"]),
+        (c, "Recall", METRICS["recall"]),
+        (d, "F1 Score", METRICS["f1"]),
+    ]
+
+    for col, label, value in metrics_to_show:
+        with col:
+            st.metric(label, f"{value * 100:.1f}%")
+
+    st.markdown("### What These Metrics Mean")
+
+    html("""
+    <div class="review-card">
+        <div class="review-title">Accuracy</div>
+        <div class="review-text">
+            Percentage of test records classified correctly overall.
+        </div>
+    </div>
+
+    <div class="review-card">
+        <div class="review-title">Precision</div>
+        <div class="review-text">
+            Among records predicted as fire-risk, the proportion that
+            actually belonged to the fire class.
+        </div>
+    </div>
+
+    <div class="review-card">
+        <div class="review-title">Recall</div>
+        <div class="review-text">
+            Among actual fire-class records, the proportion detected by
+            the model. Recall is especially useful when missed fire-risk
+            cases matter.
+        </div>
+    </div>
+
+    <div class="review-card">
+        <div class="review-title">F1 Score</div>
+        <div class="review-text">
+            A combined measure of precision and recall using their
+            harmonic mean.
+        </div>
+    </div>
+    """)
+
+    st.markdown("### Dataset and Training Setup")
+
+    d1, d2, d3 = st.columns(3)
+
+    with d1:
+        st.metric("Total Records", len(data))
+
+    with d2:
+        st.metric("Training Records", METRICS["train_size"])
+
+    with d3:
+        st.metric("Testing Records", METRICS["test_size"])
+
+    st.markdown("### Confusion Matrix")
+
+    cm = METRICS["cm"]
+
+    cm_df = pd.DataFrame(
+        cm,
+        index=["Actual: No Fire", "Actual: Fire"],
+        columns=["Predicted: No Fire", "Predicted: Fire"],
     )
 
-    try:
+    st.dataframe(
+        cm_df,
+        use_container_width=True,
+    )
 
-        w = get_weather(lat, lon)
-
-    except Exception as e:
-
-        st.error("Weather API unavailable.")
-
-        st.code(str(e))
-
-        st.stop()
-
-    st.success(f"🟢 Live weather received for {selected_region}")
+    tn, fp, fn, tp = cm.ravel()
 
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
-        st.metric("🌡️ Temperature", f"{w['temp']:.1f} °C")
+        st.metric("True Negative", int(tn))
 
     with c2:
-        st.metric("💧 Humidity", f"{w['humidity']:.0f}%")
+        st.metric("False Positive", int(fp))
 
     with c3:
-        st.metric("💨 Wind", f"{w['wind']:.1f} km/h")
+        st.metric("False Negative", int(fn))
 
     with c4:
-        st.metric("🌧️ Rain", f"{w['rain']:.1f} mm")
+        st.metric("True Positive", int(tp))
 
-    st.markdown(
-        f"""
-<div class="glass">
+    html("""
+    <div class="review-card">
+        <div class="review-title">How to read the confusion matrix</div>
+        <div class="review-text">
+            True Negative: model correctly predicted no fire.
+            False Positive: model predicted fire when the test record
+            was no fire.
+            False Negative: model missed a fire-class record.
+            True Positive: model correctly predicted the fire class.
+        </div>
+    </div>
+    """)
 
-<h2>📍 {selected_region}</h2>
+    st.markdown("### Feature Importance")
 
-<h3>☁️ {w['weather']}</h3>
-
-<p>
-<b>API Update:</b> {w['time']}
-</p>
-
-<p>
-<b>Latitude:</b> {lat:.4f}
-&nbsp;&nbsp;
-<b>Longitude:</b> {lon:.4f}
-</p>
-
-</div>
-""",
-        unsafe_allow_html=True,
+    importance_df = pd.DataFrame({
+        "Feature": FEATURES,
+        "Importance": model.feature_importances_,
+    }).sort_values(
+        "Importance",
+        ascending=False,
     )
 
-
-# =========================================================
-# ANALYTICS
-# =========================================================
-
-elif page == "📊 Analytics":
-
-    st.markdown(
-        '<div class="hero-title">' "📊 AI Model Analytics" "</div>",
-        unsafe_allow_html=True,
+    st.bar_chart(
+        importance_df.set_index("Feature")
     )
 
-    st.markdown(
-        '<div class="hero-subtitle">'
-        "Model performance, dataset information and feature importance"
-        "</div>",
-        unsafe_allow_html=True,
+    st.dataframe(
+        importance_df,
+        use_container_width=True,
+        hide_index=True,
     )
 
-    a, b, c, d = st.columns(4)
+    html("""
+    <div class="review-card">
+        <div class="review-title">Project review point</div>
+        <div class="review-text">
+            The model uses temperature, relative humidity, wind speed and,
+            when available in the dataset, rainfall. The target variable
+            is historical fire occurrence derived from whether the
+            recorded burned area is greater than zero.
+        </div>
+    </div>
 
-    with a:
-        st.metric("Accuracy", f"{METRICS['accuracy']*100:.1f}%")
-
-    with b:
-        st.metric("Precision", f"{METRICS['precision']*100:.1f}%")
-
-    with c:
-        st.metric("Recall", f"{METRICS['recall']*100:.1f}%")
-
-    with d:
-        st.metric("F1 Score", f"{METRICS['f1']*100:.1f}%")
-
-    left, right = st.columns(2)
-
-    with left:
-
-        st.markdown(
-            '<div class="section">' "🤖 Model Information" "</div>",
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            f"""
-<div class="glass">
-
-<p><b>Algorithm:</b> Random Forest Classifier</p>
-
-<p><b>Dataset Records:</b> {len(data)}</p>
-
-<p><b>Features:</b> {", ".join(FEATURES)}</p>
-
-<p><b>Target:</b> Historical fire occurrence</p>
-
-<p><b>Estimators:</b> 300 trees</p>
-
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-    with right:
-
-        st.markdown(
-            '<div class="section">' "🧮 Confusion Matrix" "</div>",
-            unsafe_allow_html=True,
-        )
-
-        cm_df = pd.DataFrame(
-            CM,
-            index=["Actual: No Fire", "Actual: Fire"],
-            columns=["Predicted: No Fire", "Predicted: Fire"],
-        )
-
-        st.dataframe(cm_df, use_container_width=True)
-
-    st.markdown(
-        '<div class="section">' "🌟 Feature Importance" "</div>", unsafe_allow_html=True
-    )
-
-    importance = pd.DataFrame(
-        {"Feature": FEATURES, "Importance": model.feature_importances_}
-    )
-
-    importance = importance.sort_values("Importance", ascending=False)
-
-    st.bar_chart(importance.set_index("Feature"), height=300)
+    <div class="review-card">
+        <div class="review-title">Important limitation</div>
+        <div class="review-text">
+            The model is an academic prototype. Its score is an estimate
+            based on historical training data and current weather inputs;
+            it is not an official wildfire warning or active-fire detector.
+        </div>
+    </div>
+    """)
 
 
-# =========================================================
-# SAFETY
-# =========================================================
+# ============================================================
+# PAGE: SAFETY
+# ============================================================
+elif page == "Safety & Awareness":
 
-elif page == "🛡️ Safety & Awareness":
+    html("""
+    <div class="hero">
+        <div class="hero-title">Forest Safety & Awareness</div>
+        <div class="hero-subtitle">
+            Preventive practices for forest-fire risk conditions
+        </div>
+    </div>
+    """)
 
-    st.markdown(
-        '<div class="hero-title">' "🛡️ Forest Safety & Awareness" "</div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown("### Current Risk-Based Guidance")
 
-    st.markdown(
-        '<div class="hero-subtitle">'
-        "Preventive awareness for forest-fire risk conditions"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    for item in recommendations(current_score):
+        html(f"""
+        <div class="review-card">
+            <div class="review-text">• {item}</div>
+        </div>
+        """)
 
-    safety_cards = [
-        (
-            "🔥 Prevent Open Fires",
-            "Avoid uncontrolled fires, burning activities and sparks near dry vegetation.",
-        ),
-        (
-            "🌿 Protect Dry Vegetation",
-            "Dry leaves, grass and vegetation can support rapid fire spread.",
-        ),
-        (
-            "💨 Watch Wind Conditions",
-            "Strong winds can contribute to faster fire spread.",
-        ),
-        (
-            "🌧️ Monitor Weather",
-            "Temperature, humidity and rainfall can change fire-risk conditions.",
-        ),
-        (
-            "📞 Report Fires",
-            "Suspected forest fires should be reported to appropriate local authorities.",
-        ),
-        (
-            "🚨 Follow Official Alerts",
-            "During real emergencies, follow instructions from authorized emergency and forest agencies.",
-        ),
+    st.markdown("### General Forest-Fire Prevention")
+
+    prevention = [
+        "Do not start uncontrolled fires or burn vegetation near dry forest areas.",
+        "Never leave campfires, cooking fires or other ignition sources unattended.",
+        "Do not throw cigarette ends, matches or other ignition materials in forest areas.",
+        "Avoid activities that can create sparks during hot, dry and windy conditions.",
+        "Report visible smoke or suspected fire to the appropriate local authorities.",
+        "Follow official forest-department and emergency instructions during high-risk periods.",
     ]
 
-    for title, text in safety_cards:
+    for item in prevention:
+        html(f"""
+        <div class="info-row">
+            {item}
+        </div>
+        """)
 
-        st.markdown(
-            f"""
-<div class="glass">
+    st.markdown("### Risk Response Levels")
 
-<h3>{title}</h3>
+    html("""
+    <div class="band band-green">
+        <b>LOW</b> — Routine monitoring and standard prevention.
+    </div>
 
-<p style="color:#cbd5e1;">
-{text}
-</p>
+    <div class="band band-yellow">
+        <b>MODERATE</b> — Increase awareness and recheck weather conditions.
+    </div>
 
-</div>
-""",
-            unsafe_allow_html=True,
-        )
+    <div class="band band-orange">
+        <b>HIGH</b> — Enhanced monitoring and preventive readiness.
+    </div>
+
+    <div class="band band-red">
+        <b>CRITICAL</b> — High-priority monitoring and adherence to official advisories.
+    </div>
+    """)
 
 
-# =========================================================
-# ABOUT
-# =========================================================
-
+# ============================================================
+# PAGE: ABOUT
+# ============================================================
 else:
 
-    st.markdown(
-        '<div class="hero-title">' "ℹ️ About EcoShield AI" "</div>",
-        unsafe_allow_html=True,
-    )
+    html("""
+    <div class="hero">
+        <div class="hero-title">About EcoShield AI</div>
+        <div class="hero-subtitle">
+            Forest Fire Risk Intelligence — Academic Project
+        </div>
+    </div>
+    """)
 
-    st.markdown(
-        '<div class="hero-subtitle">'
-        "India's Forest Fire Risk Intelligence Platform"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    html("""
+    <div class="glass">
+        <div class="section-title">Project Overview</div>
+        <div class="section-text">
+            EcoShield AI is a machine-learning based environmental
+            intelligence prototype designed to estimate forest-fire risk
+            from weather and environmental conditions. The system combines
+            a Random Forest classifier with live weather information and
+            a forest-region monitoring interface.
+        </div>
+    </div>
+    """)
 
-    st.markdown(
-        """
-<div class="glass">
+    st.markdown("### Problem Statement")
 
-<h2>🌲 Project Vision</h2>
+    html("""
+    <div class="review-card">
+        <div class="review-text">
+            Forest-fire risk can increase when environmental conditions
+            become hot, dry and windy. Traditional monitoring can require
+            continuous observation of large forest areas. EcoShield AI
+            demonstrates a software-based approach for bringing
+            environmental measurements, machine learning and visualization
+            into one monitoring dashboard.
+        </div>
+    </div>
+    """)
 
-<p>
-EcoShield AI combines machine learning and live environmental
-data to demonstrate forest-fire risk awareness across
-major forest regions of India.
-</p>
+    st.markdown("### Proposed Solution")
 
-<h3>Technology Stack</h3>
+    html("""
+    <div class="review-card">
+        <div class="review-text">
+            The system obtains current weather information for selected
+            forest regions, sends environmental values through a trained
+            Random Forest model, converts the model output into a
+            0–100 risk score, classifies the risk level, and presents
+            the result through a dashboard, map and analytical views.
+        </div>
+    </div>
+    """)
 
-<p>
-🐍 Python<br>
-🤖 Scikit-learn<br>
-🌐 Open-Meteo API<br>
-🎨 Streamlit<br>
-🗺️ PyDeck<br>
-📊 Pandas
-</p>
+    st.markdown("### System Workflow")
 
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+    workflow = [
+        "Historical forest-fire dataset",
+        "Data preparation and risk-label creation",
+        "Train/test split",
+        "Random Forest model training",
+        "Live weather retrieval",
+        "Risk-score estimation",
+        "Forest-region map visualization",
+        "Safety and monitoring guidance",
+    ]
 
-    st.markdown("""
-### 🔄 System Workflow
+    for i, step in enumerate(workflow, start=1):
+        html(f"""
+        <div class="info-row">
+            <strong>Step {i}:</strong> {step}
+        </div>
+        """)
 
-**Indian Forest Region**
+    st.markdown("### Technology Stack")
 
-↓
+    html("""
+    <div class="glass">
+        <div class="info-row"><strong>Programming:</strong> Python</div>
+        <div class="info-row"><strong>Data Processing:</strong> Pandas</div>
+        <div class="info-row"><strong>Machine Learning:</strong> Scikit-learn</div>
+        <div class="info-row"><strong>Algorithm:</strong> Random Forest Classifier</div>
+        <div class="info-row"><strong>Web Application:</strong> Streamlit</div>
+        <div class="info-row"><strong>Weather Service:</strong> Open-Meteo</div>
+        <div class="info-row"><strong>Interactive Map:</strong> PyDeck</div>
+    </div>
+    """)
 
-**Live Weather API**
+    st.markdown("### Key Modules")
 
-↓
+    modules = [
+        ("Dashboard", "Current environmental conditions and overall risk."),
+        ("Forest Map", "Regional risk visualization with hover weather details."),
+        ("Risk Prediction", "Scenario-based risk estimation using custom inputs."),
+        ("Live Weather", "Current and next-24-hour environmental conditions."),
+        ("Model Analytics", "Evaluation metrics, confusion matrix and feature importance."),
+        ("Safety & Awareness", "Risk-level guidance and prevention practices."),
+    ]
 
-**Temperature + Humidity + Wind + Rainfall**
+    for title, description in modules:
+        html(f"""
+        <div class="review-card">
+            <div class="review-title">{title}</div>
+            <div class="review-text">{description}</div>
+        </div>
+        """)
 
-↓
+    st.markdown("### Future Scope")
 
-**Random Forest Model**
+    future_scope = [
+        "Integrate satellite hotspot and vegetation information.",
+        "Use geographically representative wildfire datasets.",
+        "Add historical risk maps and seasonal trend analysis.",
+        "Add user authentication and role-based monitoring.",
+        "Deploy the dashboard as a cloud-hosted application.",
+        "Evaluate the model using additional environmental variables.",
+    ]
 
-↓
+    for item in future_scope:
+        html(f"""
+        <div class="info-row">{item}</div>
+        """)
 
-**Risk Score 0–100**
+    st.markdown("### Academic Limitation")
 
-↓
+    html("""
+    <div class="review-card">
+        <div class="review-title">Important</div>
+        <div class="review-text">
+            This project is an academic prototype. It estimates
+            environmental fire risk; it does not directly detect active
+            fires and must not be treated as a replacement for official
+            wildfire, emergency or forest-department warning systems.
+        </div>
+    </div>
+    """)
 
-**Risk Classification**
-
-↓
-
-**Explanation + Safety Recommendations**
-""")
-
-    st.warning("""
-⚠️ Academic Prototype
-
-EcoShield AI is an educational machine-learning prototype.
-The model uses historical fire records and current weather
-as model inputs.
-
-It does not directly detect active fire, smoke, satellite
-hotspots or emergency events.
-
-Operational wildfire prediction would require geographically
-representative datasets, satellite observations, vegetation
-conditions, historical fire data and extensive validation.
-""")
+    html("""
+    <div class="footer">
+        EcoShield AI v2.2 • Academic Project • Environmental Risk Awareness
+    </div>
+    """)
 
 
-# =========================================================
-# FOOTER
-# =========================================================
-
-st.markdown(
-    """
-<div class="footer">
-
-🌲 EcoShield AI &nbsp; | &nbsp;
-Protect Forests • Protect Wildlife • Protect Our Future
-
-<br><br>
-
-Data: Open-Meteo API
-&nbsp; | &nbsp;
-Model: Random Forest
-&nbsp; | &nbsp;
-Coverage: India
-
-</div>
-""",
-    unsafe_allow_html=True,
-)
+# ============================================================
+# END
+# ============================================================
